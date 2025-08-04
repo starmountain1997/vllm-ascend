@@ -23,6 +23,7 @@ class FusedMoEState(Enum):
 
 # TODO(zzzzwwjj): add soc_version to choose branch
 def get_fused_moe_state(ep_size: int, with_prefill: bool):
+    return FusedMoEState.AllGather
     enable_chunk_mc2 = envs.VLLM_ASCEND_ENABLE_CHUNK_MC2
     if ep_size == 1:
         return FusedMoEState.AllGather

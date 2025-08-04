@@ -13,6 +13,7 @@ def register_model():
         AscendQwen2_5_VLForConditionalGeneration  # noqa: F401
     from .qwen2_vl import AscendQwen2VLForConditionalGeneration  # noqa: F401
     from .qwen3 import CustomQwen3ForCausalLM  # noqa: F401
+    from .glm4_moe import CustomGlm4MoeForCausalLM
 
     ModelRegistry.register_model(
         "DeepSeekMTPModel",
@@ -64,3 +65,6 @@ def register_model():
 
     ModelRegistry.register_model(
         "Qwen3ForCausalLM", "vllm_ascend.models.qwen3:CustomQwen3ForCausalLM")
+
+    ModelRegistry.register_model(
+        "Glm4MoeForCausalLM", "vllm_ascend.models.glm4_moe:CustomGlm4MoeForCausalLM")

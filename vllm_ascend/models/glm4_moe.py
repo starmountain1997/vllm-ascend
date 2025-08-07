@@ -29,7 +29,8 @@ from vllm.distributed import (get_dp_group, get_pp_group,
                               get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               get_tp_group, split_tensor_along_last_dim,
-                              tensor_model_parallel_reduce_scatter)
+                              tensor_model_parallel_reduce_scatter,
+                              tensor_model_parallel_all_reduce)
 from vllm.model_executor.models.glm4_moe import Glm4MoeForCausalLM, Glm4MoeDecoderLayer, Glm4MoeModel, Glm4MoeAttention, Glm4MoeMLP
 from vllm_ascend.ops.fused_moe import AscendFusedMoE
 from vllm.forward_context import get_forward_context
@@ -93,7 +94,7 @@ class CustomGlm4MoE(nn.Module):
                 intermediate_size=intermediate_size,
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
-                reduce_results=True,
+                reduce_results=False,
                 prefix=f"{prefix}.shared_experts",
             )
         else:
@@ -131,6 +132,8 @@ class CustomGlm4MoE(nn.Module):
         hidden_states = (
             experts_hidden_states[0] * self.routed_scaling_factor +
             experts_hidden_states[1])
+        if self.tp_size > 1:
+            hidden_states = tensor_model_parallel_all_reduce(hidden_states)
 
         return hidden_states
 

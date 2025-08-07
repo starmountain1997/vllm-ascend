@@ -1454,7 +1454,7 @@ class AscendFusedMoE(FusedMoE):
         else:
             final_hidden_states = e_hidden_states
 
-        if tp_size > 1 and fused_moe_state == FusedMoEState.AllGather:
+        if self.reduce_results and (tp_size > 1 and fused_moe_state == FusedMoEState.AllGather):
             final_hidden_states = tensor_model_parallel_all_reduce(
                 final_hidden_states)
 

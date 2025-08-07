@@ -864,6 +864,7 @@ def select_experts(
     custom_routing_function: Optional[Callable] = None,
     scoring_func: str = "softmax",
     e_score_correction_bias: Optional[torch.Tensor] = None,
+    global_num_experts=None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Select top-k experts based on router logits.
@@ -902,6 +903,7 @@ def select_experts(
         if not use_grouped_topk and custom_routing_function is None:
             topk_weights, topk_ids, _ = torch_npu.npu_moe_gating_top_k_softmax(
                 x=router_logits, finished=None, k=top_k)
+            topk_ids = topk_ids.to(torch.int32)
             topk_weights = _renormalize_topk_weights(topk_weights, renormalize)
             return topk_weights, topk_ids
 
@@ -948,6 +950,7 @@ def select_experts(
             gating_output=router_logits,
             topk=top_k,
             renormalize=renormalize,
+            global_num_experts=global_num_experts
         )
         # Required by npu_moe_init_routing
         topk_ids = topk_ids.to(torch.int32)
@@ -1046,6 +1049,7 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
                 custom_routing_function=custom_routing_function,
                 scoring_func=scoring_func,
                 e_score_correction_bias=e_score_correction_bias,
+                global_num_experts=global_num_experts,
             )
 
         topk_weights = topk_weights.to(x.dtype)

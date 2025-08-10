@@ -26,6 +26,10 @@ def register_model():
         "Qwen2VLForConditionalGeneration",
         "vllm_ascend.models.qwen2_vl:AscendQwen2VLForConditionalGeneration")
 
+    ModelRegistry.register_model(
+        "Glm4vMoeForConditionalGeneration",
+        "vllm_ascend.models.glm4v_moe:Glm4vForConditionalGeneration")
+
     if envs.USE_OPTIMIZED_MODEL:
         ModelRegistry.register_model(
             "Qwen2_5_VLForConditionalGeneration",

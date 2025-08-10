@@ -204,7 +204,11 @@ def update_aclgraph_sizes(vllm_config: VllmConfig) -> None:
         return
 
     # Calculate parallel configuration factor
-    num_hidden_layers = vllm_config.model_config.hf_config.num_hidden_layers
+    if getattr(vllm_config.model_config.hf_config, "num_hidden_layers", None) is not None:
+        # If num_hidden_layers is defined, use it
+        num_hidden_layers = vllm_config.model_config.hf_config.num_hidden_layers
+    else:
+        num_hidden_layers = vllm_config.model_config.hf_config.text_config.num_hidden_layers
     parallel_config = vllm_config.parallel_config
 
     # TODO: Find out whether we need to take into account the pp_size

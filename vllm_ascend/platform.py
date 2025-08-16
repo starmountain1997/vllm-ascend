@@ -206,7 +206,7 @@ class NPUPlatform(Platform):
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
-                             kv_cache_dtype, block_size, use_v1, use_mla):
+                             kv_cache_dtype, block_size, use_v1, use_mla, has_sink):
         if not use_v1:
             raise ValueError("vLLM Ascend does not support V0 engine.")
 

@@ -440,8 +440,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             self.requests[req_id] = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
-                mm_kwargs=new_req_data.mm_kwargs,
-                mm_positions=new_req_data.mm_positions,
+                mm_kwargs=[],  # Will be populated from mm_features
+                mm_positions=[],  # Will be populated from mm_features
+                mm_hashes=None if (vllm_version_is("0.10.1.1")
+                          or vllm_version_is("0.10.1")) else [],
                 sampling_params=sampling_params,
                 pooling_params=pooling_params,
                 generator=generator,
@@ -449,13 +451,22 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 num_computed_tokens=new_req_data.num_computed_tokens,
                 output_token_ids=[],
                 lora_request=new_req_data.lora_request,
-                **({
-                    "mm_hashes": new_req_data.mm_hashes
-                } if not (vllm_version_is("0.10.1.1")
-                          or vllm_version_is("0.10.1")) else {
-                              "mm_hashes": None
-                          }),
             )
+
+            # Convert mm_features to mm_kwargs and mm_positions
+            if new_req_data.mm_features:
+                for i, mm_feature in enumerate(new_req_data.mm_features):
+                    if mm_feature.data is not None:
+                        # Use the data directly from mm_feature
+                        self.requests[req_id].mm_kwargs.append(mm_feature.data)
+
+                        # Use the mm_position directly from mm_feature
+                        self.requests[req_id].mm_positions.append(mm_feature.mm_position)
+
+                        # Add mm_hash if needed
+                        if not (vllm_version_is("0.10.1.1")
+                                or vllm_version_is("0.10.1")):
+                            self.requests[req_id].mm_hashes.append(mm_feature.identifier)
 
             # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
             if self.uses_mrope:

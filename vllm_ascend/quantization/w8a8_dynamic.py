@@ -85,6 +85,11 @@ class AscendW8A8DynamicLinearMethod:
             quantized_x, dynamic_scale = x
         pertoken_scale = (dynamic_scale
                           if config.get("pertoken_scale", True) else None)
+        dim_flag = pertoken_scale.dim()==2
+        if dim_flag:
+            seq_len, bs, hidden_len = quantized_x.shape
+            quantized_x = quantized_x.view(-1, hidden_len)
+            pertoken_scale = pertoken_scale.view(seq_len*bs)
 
         output = torch_npu.npu_quant_matmul(
             quantized_x,
@@ -94,6 +99,8 @@ class AscendW8A8DynamicLinearMethod:
             bias=bias,
             output_dtype=output_dtype,
         )
+        if dim_flag:
+            output = output.view(seq_len, bs, -1)
         return ((output, dynamic_scale)
                 if config.get("return_scale", False) else output)
 

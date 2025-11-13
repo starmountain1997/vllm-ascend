@@ -296,6 +296,36 @@ def vllm_version_is(target_vllm_version: str):
             "format of x.y.z.")
 
 
+def _get_num_hidden_layers(hf_config) -> int:
+    """
+    Get the number of hidden layers from different model config structures.
+
+    Handles various model architectures:
+    - Standard models: hf_config.num_hidden_layers
+    - Qwen3OmniMoe: nested configs with thinker_config.text_config.num_hidden_layers
+    """
+    # First try standard attribute access
+    if hasattr(hf_config, 'num_hidden_layers'):
+        return hf_config.num_hidden_layers
+
+    # Handle Qwen3OmniMoe models with nested configs
+    if hasattr(hf_config, 'thinker_config'):
+        # Qwen3OmniMoe: use the main text processor layers as the primary count
+        if hasattr(hf_config.thinker_config, 'text_config'):
+            if hasattr(hf_config.thinker_config.text_config, 'num_hidden_layers'):
+                return hf_config.thinker_config.text_config.num_hidden_layers
+
+    # Handle other multimodal models with text_config
+    if hasattr(hf_config, 'text_config'):
+        if hasattr(hf_config.text_config, 'num_hidden_layers'):
+            return hf_config.text_config.num_hidden_layers
+
+    raise AttributeError(
+        f"Cannot determine num_hidden_layers for model type: {type(hf_config)}. "
+        "Available attributes: " + ", ".join([attr for attr in dir(hf_config) if not attr.startswith('_')])
+    )
+
+
 def update_aclgraph_sizes(vllm_config: VllmConfig) -> None:
     """Update ACL graph capture sizes based on hardware limitations"""
     # Store original configuration and temporarily clear it
@@ -304,7 +334,9 @@ def update_aclgraph_sizes(vllm_config: VllmConfig) -> None:
         compilation_config.cudagraph_capture_sizes, None
 
     # Calculate parallel configuration factor
-    num_hidden_layers = vllm_config.model_config.hf_config.num_hidden_layers
+    # Handle different model types with different config structures
+    hf_config = vllm_config.model_config.hf_config
+    num_hidden_layers = _get_num_hidden_layers(hf_config)
     parallel_config = vllm_config.parallel_config
 
     # TODO: Find out whether we need to take into account the pp_size

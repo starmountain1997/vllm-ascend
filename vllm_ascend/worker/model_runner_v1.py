@@ -1893,6 +1893,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         else:
             raise ValueError(f"Unsupported soc_version: {soc_version}")
 
+        if self.parallel_config.enable_expert_parallel and envs_ascend.VLLM_ENABLE_FUSED_EXPERTS_ALLGATHER_EP:
+            moe_comm_type = MoECommType.ALLGATHER_EP
+
         if moe_comm_type == MoECommType.ALLGATHER and with_prefill:
             moe_comm_type = MoECommType.NAIVE_MULTICAST
 

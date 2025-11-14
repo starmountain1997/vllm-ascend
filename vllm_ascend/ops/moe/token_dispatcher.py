@@ -718,3 +718,98 @@ class TokenDispatcherWithAll2AllV(MoETokenDispatcher):
         # Reshape the output tensor
         output = output.view(self.hidden_shape)
         return output
+
+class TokenDispatcherWithAllGatherEP(MoETokenDispatcher):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Store information needed for token_combine
+        self.original_shape = None
+        self.expanded_x_idx = None
+        self.topk_weights = None
+        self.expert_map = None
+        self.with_quant = False
+
+    def token_dispatch(self,
+                       hidden_states: torch.Tensor,
+                       topk_weights: torch.Tensor,
+                       topk_ids: torch.Tensor,
+                       row_idx: torch.Tensor,
+                       expert_map: Optional[torch.Tensor] = None,
+                       log2phy: Optional[torch.Tensor] = None,
+                       global_redundant_expert_num: int = 0,
+                       shared_experts: Optional[Any] = None,
+                       quantized_x_for_share: Optional[Any] = None,
+                       dynamic_scale_for_share: Optional[Any] = None,
+                       mc2_mask: Optional[torch.Tensor] = None,
+                       apply_router_weight_on_input: bool = False,
+                       with_quant: bool = False,
+                       dynamic_eplb: bool = False):
+        # Store information needed for token_combine
+        self.original_shape = hidden_states.shape
+        self.topk_weights = topk_weights
+        self.expert_map = expert_map
+        self.with_quant = with_quant
+
+        if len(self.original_shape) == 3:
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+
+        num_tokens = hidden_states.shape[0]
+        batch_size, hidden_size = hidden_states.shape
+        topk_weights = topk_weights.to(hidden_states.dtype)
+
+        ep_group = get_ep_group().device_group
+        ep_rank = torch.distributed.get_rank(group=ep_group)
+        ep_size = torch.distributed.get_world_size(ep_group)
+
+        global_num_experts = len(expert_map)
+        local_num_experts = global_num_experts // ep_size
+
+        if with_quant:
+            hidden_states, pertoken_scale = torch_npu.npu_dynamic_quant(hidden_states)
+        else:
+            pertoken_scale = None
+
+        hidden_states, expanded_x_idx, expert_tokens, pertoken_scale = torch_npu.npu_moe_init_routing_v2(
+            hidden_states,
+            topk_ids,
+            scale=pertoken_scale,
+            offset=None,
+            active_num=num_tokens * self.top_k,
+            expert_num=global_num_experts,
+            expert_tokens_num_type=1,
+            expert_tokens_num_flag=True,
+            active_expert_range=[
+                ep_rank * local_num_experts, (ep_rank + 1) * local_num_experts
+            ],
+            quant_mode=-1,
+            row_idx_type=1)
+
+        self.expanded_x_idx = expanded_x_idx
+        group_list_type = 1
+
+        return {
+            "group_list_type": group_list_type,
+            "hidden_states": hidden_states,
+            "group_list": expert_tokens,
+            "dynamic_scale": pertoken_scale,
+        }
+
+
+
+    def token_combine(self,
+                      hidden_states: torch.Tensor,
+                      bias: torch.Tensor = None):
+        final_hidden_states = torch_npu.npu_moe_finalize_routing(
+            hidden_states,
+            skip1=None,
+            skip2=None,
+            bias=bias,
+            scales=self.topk_weights,
+            expanded_src_to_dst_row=self.expanded_x_idx,
+            export_for_source_row=None,
+        )
+
+        if len(self.original_shape) == 3:
+            final_hidden_states = final_hidden_states.view(self.original_shape)
+
+        return final_hidden_states

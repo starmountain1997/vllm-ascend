@@ -28,15 +28,15 @@ class MoECommType(Enum):
     MC2 = 1
     ALLTOALL = 2
     NAIVE_MULTICAST = 3
+    ALLGATHER_EP = 4
 
 
 # TODO(zzzzwwjj): add soc_version to choose branch
 def _get_fused_moe_state(ep_size: int, with_prefill: bool,
-                         is_deepseek_v3_r1: bool):
+                         is_deepseek_v3_r1: bool=False):
     # the fusion operator torch_npu.npu_grouped_matmul_finalize_routing called by allgather ep
     # only supports deepseek v3/r1
-    if (envs_ascend.VLLM_ENABLE_FUSED_EXPERTS_ALLGATHER_EP and ep_size > 1
-            and is_deepseek_v3_r1):
+    if (envs_ascend.VLLM_ENABLE_FUSED_EXPERTS_ALLGATHER_EP and ep_size > 1):
         return FusedMoEState.AllGatherEP
     elif ep_size == 1:
         if with_prefill:
@@ -82,6 +82,7 @@ def set_ascend_forward_context(
         forward_context = get_forward_context()
 
         from vllm_ascend.ops.moe.moe_comm_method import get_moe_comm_method
+
         forward_context.moe_comm_type = moe_comm_type
         forward_context.moe_comm_method = get_moe_comm_method(moe_comm_type)
 

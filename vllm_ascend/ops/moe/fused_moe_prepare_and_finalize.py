@@ -457,3 +457,26 @@ class FusedMoEPrepareAndFinalizeWithNaiveMulticast(FusedMoEPrepareAndFinalize):
             hidden_states = tensor_model_parallel_all_reduce(hidden_states)
 
         return hidden_states
+
+
+class FusedMoEPrepareAndFinalizeWithAllGatherEP(FusedMoEPrepareAndFinalize):
+    """
+    MoE communication strategy using All-Gather for Expert Parallelism (EP).
+    Designed for EP > 1: gather inputs across EP ranks before MoE computation.
+    This follows the same pattern as AllGather DP but operates across expert groups.
+    """
+
+    def prepare(
+        self,
+        hidden_states: torch.Tensor,
+        router_logits: torch.Tensor,
+        enable_shared_expert_dp: bool = False,
+        rm_router_logits: bool = False,
+        replace_allreduce: bool = False,
+        gate=None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return hidden_states, router_logits, None
+½O
+    def finalize(self, hidden_states: torch.Tensor,
+                 reduce_results: bool) -> torch.Tensor:
+        return hidden_states

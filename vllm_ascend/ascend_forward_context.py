@@ -33,6 +33,7 @@ class MoECommType(Enum):
     MC2 = 1
     ALLTOALL = 2
     NAIVE_MULTICAST = 3
+    ALLGATHER_EP = 4
 
 
 # TODO(zzzzwwjj): add soc_version to choose branch
@@ -41,7 +42,6 @@ def _get_fused_moe_state(ep_size: int, with_prefill: bool,
     # the fusion operator torch_npu.npu_grouped_matmul_finalize_routing called by allgather ep
     # only supports deepseek v3/r1
     if (envs_ascend.VLLM_ENABLE_FUSED_EXPERTS_ALLGATHER_EP and ep_size > 1):
-        print("<><><><><>all gather ep")
         return FusedMoEState.AllGatherEP
     elif ep_size == 1:
         if with_prefill:

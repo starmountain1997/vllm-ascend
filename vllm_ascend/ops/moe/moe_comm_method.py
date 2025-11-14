@@ -27,12 +27,14 @@ from vllm_ascend.ascend_forward_context import MoECommType
 from vllm_ascend.ops.moe.fused_moe_prepare_and_finalize import (
     FusedMoEPrepareAndFinalizeWithAll2All,
     FusedMoEPrepareAndFinalizeWithAllGather, FusedMoEPrepareAndFinalizeWithMC2,
-    FusedMoEPrepareAndFinalizeWithNaiveMulticast)
+    FusedMoEPrepareAndFinalizeWithNaiveMulticast,FusedMoEPrepareAndFinalizeWithAllGatherEP)
 from vllm_ascend.ops.moe.moe_mlp import unified_apply_mlp
 from vllm_ascend.ops.moe.token_dispatcher import (TokenDispatcherWithAll2AllV,
                                                   TokenDispatcherWithAllGather,
                                                   TokenDispatcherWithMC2,
-                                                  TokenDispatcherWithMoge)
+                                                  TokenDispatcherWithMoge,
+                                                  TokenDispatcherWithAllGatherEP
+                                                  )
 
 _MoECommMethods: Dict[Optional[MoECommType], MoECommMethod] = {}
 
@@ -48,6 +50,7 @@ def setup_moe_comm_method(moe_config):
     _MoECommMethods[MoECommType.MC2] = MC2CommImpl(moe_config)
     _MoECommMethods[MoECommType.NAIVE_MULTICAST] = NaiveMulticastCommImpl(
         moe_config)
+    _MoECommMethods[MoECommType.ALLGATHER_EP] = AllGatherEpCommImpl(moe_config)
 
 
 class MoECommMethod(ABC):
@@ -222,6 +225,22 @@ class MC2CommImpl(MoECommMethod):
 
     def _get_fused_moe_prepare_finalize(self):
         return FusedMoEPrepareAndFinalizeWithMC2(self.moe_config)
+
+class AllGatherEpCommImpl(MoECommMethod):
+    """This implementation is for the scenarios listed below:
+    1. `enable_expert_parallel=True`.
+    2. `npu_moe_distribute_dispatch` and `npu_moe_distribute_combine` are available.
+    3. `enable_expert_parallel=False` is not supported.
+    
+    This implementation uses the MC2 communication method, which is optimized for
+    Communication and Computation parallelism on Ascend devices.
+    """
+
+    def _get_token_dispatcher(self):
+        return TokenDispatcherWithAllGatherEP()
+
+    def _get_fused_moe_prepare_finalize(self):
+        return FusedMoEPrepareAndFinalizeWithAllGatherEP(self.moe_config)
 
 
 class AlltoAllCommImpl(MoECommMethod):

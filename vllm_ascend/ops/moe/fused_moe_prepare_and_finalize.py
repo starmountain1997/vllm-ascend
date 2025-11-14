@@ -518,3 +518,35 @@ class FusedMoEPrepareAndFinalizeWithNaiveMulticast(FusedMoEPrepareAndFinalize):
             hidden_states = tensor_model_parallel_all_reduce(hidden_states)
 
         return hidden_states
+
+
+class FusedMoEPrepareAndFinalizeWithAllGatherEP(FusedMoEPrepareAndFinalize):
+    def prepare(
+        self,
+        hidden_states: torch.Tensor,
+        router_logits: torch.Tensor,
+        enable_shared_expert_dp: bool = False,
+        replace_allreduce: bool = False
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        self.enable_shared_expert_dp = enable_shared_expert_dp
+        self.replace_allreduce = replace_allreduce
+
+        self.num_tokens = hidden_states.shape[0]
+
+        hidden_states = torch.ops.vllm.maybe_all_gather_and_maybe_unpad(
+            hidden_states, True, True)
+        router_logits = torch.ops.vllm.maybe_all_gather_and_maybe_unpad(
+            router_logits, True, True)
+
+        return hidden_states, router_logits, None
+
+    def finalize(self, hidden_states: torch.Tensor,
+                 reduce_results: bool) -> torch.Tensor:
+        hidden_states = torch.ops.vllm.maybe_pad_and_reduce(
+            hidden_states, True)
+
+        if reduce_results and (self.moe_config.tp_size > 1
+                               or self.moe_config.ep_size > 1):
+            hidden_states = tensor_model_parallel_all_reduce(hidden_states)
+
+        return hidden_states

@@ -137,7 +137,7 @@ main() {
     check_npu_info
     check_and_config
     show_vllm_info
-    if [[ "$CONFIG_YAML_PATH" == *"DeepSeek-V3_2-W8A8.yaml" ]]; then
+    if [[ "$CONFIG_YAML_PATH" == *"DeepSeek-V2_3-W8A8.yaml" ]] || [[ "$CONFIG_YAML_PATH" == *"DeepSeek-V2_3-W8A8-dual-nodes.yaml" ]]; then
         install_extra_components
     fi
     upgrade_vllm_ascend_scr

@@ -78,6 +78,9 @@ jobs:
           - name: multi-node-dpsk3.2-w8a8-4node
             config_file_path: DeepSeek-v3_2-W8A8-A3.yaml
             size: 4
+          - name: multi-node-dpsk3.2-w8a8-2node
+            config_file_path: DeepSeek-v3_2-W8A8-A3-dual-nodes.yaml
+            size: 4
     uses: ./.github/workflows/_e2e_nightly_multi_node.yaml
     with:
       soc_version: a3

@@ -40,7 +40,6 @@ deployment:
       --additional-config '{"layer_sharding": ["q_b_proj", "o_proj"]}'
       --tokenizer-mode deepseek_v32
       --reasoning-parser deepseek_v3
-      --api-server-count 4
 
   -
     server_cmd: >

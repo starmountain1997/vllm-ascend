@@ -857,6 +857,27 @@ class AscendSFAImpl(MLAAttentionImpl):
         rmsnorm_epsilon_cq = self.q_a_layernorm.variance_epsilon  # type: ignore[union-attr]
         rmsnorm_epsilon_ckv = self.kv_a_layernorm.variance_epsilon  # type: ignore[union-attr]
 
+        # Prepare rope_sin and rope_cos for npu_mla_prolog_v3
+        # hidden_states is BS combined (2D: [T, He]), rope_sin/rope_cos should be 2D: [T, Dr]
+        # attn_metadata.sin/cos may be 4D: [T, 1, 1, Dr], need to reshape
+        rope_sin = attn_metadata.sin
+        rope_cos = attn_metadata.cos
+
+        if rope_sin.dim() == 4:
+            # Squeeze dimensions 1 and 2: [T, 1, 1, Dr] -> [T, Dr]
+            rope_sin = rope_sin.squeeze(1).squeeze(1).contiguous()
+            rope_cos = rope_cos.squeeze(1).squeeze(1).contiguous()
+        elif rope_sin.dim() == 3:
+            # 3D case: [B, S, Dr], keep as is for non-BS-combined case
+            # but hidden_states is BS combined, so this shouldn't happen
+            pass
+
+        # Ensure shape matches hidden_states first dimension
+        assert rope_sin.shape[0] == hidden_states.shape[0], \
+            f"rope_sin shape {rope_sin.shape} incompatible with hidden_states shape {hidden_states.shape}"
+        assert rope_cos.shape[0] == hidden_states.shape[0], \
+            f"rope_cos shape {rope_cos.shape} incompatible with hidden_states shape {hidden_states.shape}"
+
         query, query_rope, dequant_scale_q_nope, query_norm, dequant_scale_q_norm = torch_npu.npu_mla_prolog_v3(
             token_x=hidden_states,
             weight_dq=self.weight_dq,
@@ -865,8 +886,8 @@ class AscendSFAImpl(MLAAttentionImpl):
             weight_dkv_kr=self.weight_dkv_kr,
             rmsnorm_gamma_cq=self.rmsnorm_gamma_cq,
             rmsnorm_gamma_ckv=self.rmsnorm_gamma_ckv,
-            rope_sin=attn_metadata.sin,
-            rope_cos=attn_metadata.cos,
+            rope_sin=rope_sin,
+            rope_cos=rope_cos,
             kv_cache=k_nope,  # k^C cache
             kr_cache=k_pe,    # k^R cache
             cache_index=cache_index,

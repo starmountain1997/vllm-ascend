@@ -740,13 +740,11 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.rmsnorm_gamma_ckv = self.kv_a_layernorm.weight.data  
 
         device = self.q_proj.weight.device
-        self.quant_scale_ckv = torch.tensor([1], dtype=torch.float32, device=device)
+        self.quant_scale_ckv = torch.tensor([1], dtype=torch.float32, device=device) # TODO: 需要修正为正确的 per-tile 量化的 scale 参数
 
-        self.smooth_scales_cq = torch.ones(1, self.q_lora_rank, dtype=torch.float32, device=device)
+        self.smooth_scales_cq = torch.ones(1, dtype=torch.float32, device=device)
 
-        self.dequant_scale_x = torch.ones(1, dtype=torch.float32, device=device)
-
-        self.k_nope_clip_alpha = torch.tensor([1.0], dtype=torch.float32, device=device)
+        self.k_nope_clip_alpha = torch.tensor([1.0], dtype=torch.float32, device=device) # TODO: 需要正确设置 clip alpha 参数
 
         self.gamma1 = self.q_a_layernorm.weight.data  
         self.beta1 = self.q_a_layernorm.bias.data
@@ -757,6 +755,10 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.quant_offset1 = self.q_proj.input_offset.data
         self.ctkv_scale = torch.tensor([1], dtype=act_dtype, device=device)
         self.q_nope_scale = torch.tensor([1], dtype=act_dtype, device=device)
+
+        self.aclnn_input_scale = self.fused_qkv_a_proj.aclnn_input_scale.clone().detach()
+        self.aclnn_input_scale_reciprocal = self.fused_qkv_a_proj.aclnn_input_scale_reciprocal.clone().detach()
+        self.aclnn_input_offset = self.fused_qkv_a_proj.aclnn_input_offset.clone().detach()
 
         # On KV consumers (decode-only) MLAPO uses the transformed weights built above;
         # the original fused_qkv_a_proj/q_proj weights and quant params are no longer
@@ -843,7 +845,12 @@ class AscendSFAImpl(MLAAttentionImpl):
     ):
         # hidden_states 是 BS 合轴的
         # kv_cache is a tuple of (k_nope, k_pe, k)
-        k_nope, k_pe, k = kv_cache
+        k_nope, k_pe = kv_cache[0], kv_cache[1]
+
+
+        # 手动 hidden_states 转为 int8
+        quanted_hidden_states, quanted_hidden_states_scale = torch_npu.npu_dynamic_quant(hidden_states)
+        quanted_k_nope, _ = torch_npu.npu_dynamic_quant(k_nope)
 
         cache_index = attn_metadata.slot_mapping
         if self.enable_dsa_cp:
@@ -854,8 +861,8 @@ class AscendSFAImpl(MLAAttentionImpl):
         if self.enable_dsa_cp:
             actual_seq_len = attn_metadata.dsa_cp_context.actual_seq_lengths_query
 
-        rmsnorm_epsilon_cq = self.q_a_layernorm.variance_epsilon  # type: ignore[union-attr]
-        rmsnorm_epsilon_ckv = self.kv_a_layernorm.variance_epsilon  # type: ignore[union-attr]
+        rmsnorm_epsilon_cq = self.q_a_layernorm.variance_epsilon  
+        rmsnorm_epsilon_ckv = self.kv_a_layernorm.variance_epsilon  
 
         # Prepare rope_sin and rope_cos for npu_mla_prolog_v3
         # hidden_states is BS combined (2D: [T, He]), rope_sin/rope_cos should be 2D: [T, Dr]
@@ -879,7 +886,7 @@ class AscendSFAImpl(MLAAttentionImpl):
             f"rope_cos shape {rope_cos.shape} incompatible with hidden_states shape {hidden_states.shape}"
 
         query, query_rope, dequant_scale_q_nope, query_norm, dequant_scale_q_norm = torch_npu.npu_mla_prolog_v3(
-            token_x=hidden_states,
+            token_x=quanted_hidden_states,
             weight_dq=self.weight_dq,
             weight_uq_qr=self.weight_uq_qr,
             weight_uk=self.weight_uk,
@@ -888,10 +895,10 @@ class AscendSFAImpl(MLAAttentionImpl):
             rmsnorm_gamma_ckv=self.rmsnorm_gamma_ckv,
             rope_sin=rope_sin,
             rope_cos=rope_cos,
-            kv_cache=k_nope,  # k^C cache
+            kv_cache=quanted_k_nope,  # k^C cache
             kr_cache=k_pe,    # k^R cache
             cache_index=cache_index,
-            dequant_scale_x=self.dequant_scale_x,
+            dequant_scale_x=quanted_hidden_states_scale,
             dequant_scale_w_dq=self.dequant_scale_w_dq,
             dequant_scale_w_uq_qr=self.dequant_scale_w_uq_qr,
             dequant_scale_w_dkv_kr=self.dequant_scale_w_dkv_kr,
@@ -905,10 +912,10 @@ class AscendSFAImpl(MLAAttentionImpl):
             cache_mode='PA_BSND',
             query_norm_flag=False,
             weight_quant_mode=2,
-            kv_cache_quant_mode=1, # per-tensor 量化
-            query_quant_mode=0,
+            kv_cache_quant_mode=3, # per-tail 量化
+            query_quant_mode=1,
             ckvkr_repo_mode=0,
-            quant_scale_repo_mode=0,
+            quant_scale_repo_mode=1,
             tile_size=128,
             qc_qr_scale=1.0,
             kc_scale=1.0)

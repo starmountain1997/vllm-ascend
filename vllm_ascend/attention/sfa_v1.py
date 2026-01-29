@@ -659,22 +659,12 @@ class AscendSFAImpl(MLAAttentionImpl):
         # Hcq = q_lora_rank
 
         # DEBUG
-        print(f"[DEBUG _process_weights_for_fused_mlapo_v3]")
-        print(f"  fused_qkv_a_proj.weight.data.shape: {self.fused_qkv_a_proj.weight.data.shape}")
-        print(f"  q_lora_rank: {self.q_lora_rank}")
-        print(f"  kv_lora_rank: {self.kv_lora_rank}")
-        print(f"  qk_rope_head_dim: {self.qk_rope_head_dim}")
-        print(f"  He (hidden_size): {self.fused_qkv_a_proj.weight.data.shape[0]}")
 
         weight_dq = self.fused_qkv_a_proj.weight.data[..., :self.q_lora_rank].contiguous()
-        print(f"  weight_dq after slice: {weight_dq.shape}")
         # [Hcq, He] -> [He, Hcq]
         weight_dq = weight_dq.t().contiguous()
-        print(f"  weight_dq after transpose: {weight_dq.shape}")
-        weight_dq = transdata(weight_dq, block_size=(16, 32)).unsqueeze(0).contiguous()
-        print(f"  weight_dq after transdata: {weight_dq.shape}")
+        # weight_dq = transdata(weight_dq, block_size=(16, 32)).unsqueeze(0).contiguous()
         self.weight_dq = torch_npu.npu_format_cast(weight_dq, 29)
-        print(f"  weight_dq after npu_format_cast: {self.weight_dq.shape}")
 
         weight_dkv_kr = self.fused_qkv_a_proj.weight.data[..., self.q_lora_rank:].contiguous()
         weight_dkv_kr = weight_dkv_kr.t().contiguous()  # [He, Hckv+Dr]

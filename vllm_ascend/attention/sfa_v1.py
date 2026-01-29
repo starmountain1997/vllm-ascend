@@ -744,6 +744,8 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         self.smooth_scales_cq = torch.ones(1, dtype=torch.float32, device=device)
 
+        self.dequant_scale_x = torch.ones(1, dtype=torch.float32, device=device)
+
         self.k_nope_clip_alpha = torch.tensor([1.0], dtype=torch.float32, device=device) # TODO: 需要正确设置 clip alpha 参数
 
         self.gamma1 = self.q_a_layernorm.weight.data  
@@ -843,12 +845,10 @@ class AscendSFAImpl(MLAAttentionImpl):
         need_gather_q_kv: bool,
         num_input_tokens: int,
     ):
-        # hidden_states 是 BS 合轴的
         # kv_cache is a tuple of (k_nope, k_pe, k)
         k_nope, k_pe = kv_cache[0], kv_cache[1]
 
 
-        # 手动 hidden_states 转为 int8
         quanted_hidden_states, quanted_hidden_states_scale = torch_npu.npu_dynamic_quant(hidden_states)
         quanted_k_nope, _ = torch_npu.npu_dynamic_quant(k_nope)
 
@@ -864,9 +864,6 @@ class AscendSFAImpl(MLAAttentionImpl):
         rmsnorm_epsilon_cq = self.q_a_layernorm.variance_epsilon  
         rmsnorm_epsilon_ckv = self.kv_a_layernorm.variance_epsilon  
 
-        # Prepare rope_sin and rope_cos for npu_mla_prolog_v3
-        # hidden_states is BS combined (2D: [T, He]), rope_sin/rope_cos should be 2D: [T, Dr]
-        # attn_metadata.sin/cos may be 4D: [T, 1, 1, Dr], need to reshape
         rope_sin = attn_metadata.sin
         rope_cos = attn_metadata.cos
 
@@ -885,24 +882,28 @@ class AscendSFAImpl(MLAAttentionImpl):
         assert rope_cos.shape[0] == hidden_states.shape[0], \
             f"rope_cos shape {rope_cos.shape} incompatible with hidden_states shape {hidden_states.shape}"
 
+
         query, query_rope, dequant_scale_q_nope, query_norm, dequant_scale_q_norm = torch_npu.npu_mla_prolog_v3(
+            # token_x=hidden_states,
             token_x=quanted_hidden_states,
-            weight_dq=self.weight_dq,
-            weight_uq_qr=self.weight_uq_qr,
-            weight_uk=self.weight_uk,
-            weight_dkv_kr=self.weight_dkv_kr,
+            weight_dq=self.weight_dq, # int8
+            weight_uq_qr=self.weight_uq_qr,  # int8
+            weight_uk=self.weight_uk, # bf16
+            weight_dkv_kr=self.weight_dkv_kr, # int8
             rmsnorm_gamma_cq=self.rmsnorm_gamma_cq,
             rmsnorm_gamma_ckv=self.rmsnorm_gamma_ckv,
             rope_sin=rope_sin,
             rope_cos=rope_cos,
-            kv_cache=quanted_k_nope,  # k^C cache
+            kv_cache=k_nope,  # k^C cache
             kr_cache=k_pe,    # k^R cache
-            cache_index=cache_index,
+            cache_index=cache_index, # TODO: 需要转为 int64
+            # dequant_scale_x=self.dequant_scale_x,
             dequant_scale_x=quanted_hidden_states_scale,
             dequant_scale_w_dq=self.dequant_scale_w_dq,
             dequant_scale_w_uq_qr=self.dequant_scale_w_uq_qr,
             dequant_scale_w_dkv_kr=self.dequant_scale_w_dkv_kr,
-            quant_scale_ckv=self.quant_scale_ckv,
+            # quant_scale_ckv=self.quant_scale_ckv, # not used 
+            quant_scale_ckv=None, # not used 
             quant_scale_ckr=None,  # Not used in per-tensor mode
             smooth_scales_cq=self.smooth_scales_cq,
             actual_seq_len=actual_seq_len,
@@ -910,12 +911,12 @@ class AscendSFAImpl(MLAAttentionImpl):
             rmsnorm_epsilon_cq=rmsnorm_epsilon_cq,
             rmsnorm_epsilon_ckv=rmsnorm_epsilon_ckv,
             cache_mode='PA_BSND',
-            query_norm_flag=False,
-            weight_quant_mode=2,
-            kv_cache_quant_mode=3, # per-tail 量化
-            query_quant_mode=1,
-            ckvkr_repo_mode=0,
-            quant_scale_repo_mode=1,
+            query_norm_flag=True,
+            weight_quant_mode=2, # weight_dq、weight_uq_qr、weight_dkv_kr 量化
+            kv_cache_quant_mode=0, # 先调通这个场景
+            query_quant_mode=0, # 
+            ckvkr_repo_mode=0, # 锁定 0
+            quant_scale_repo_mode=0, # 锁定 0
             tile_size=128,
             qc_qr_scale=1.0,
             kc_scale=1.0)

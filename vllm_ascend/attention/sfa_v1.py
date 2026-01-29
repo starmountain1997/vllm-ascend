@@ -658,11 +658,23 @@ class AscendSFAImpl(MLAAttentionImpl):
         # fused_qkv_a_proj [q_lora_rank + kv_lora_rank + qk_rope_head_dim, He]
         # Hcq = q_lora_rank
 
+        # DEBUG
+        print(f"[DEBUG _process_weights_for_fused_mlapo_v3]")
+        print(f"  fused_qkv_a_proj.weight.data.shape: {self.fused_qkv_a_proj.weight.data.shape}")
+        print(f"  q_lora_rank: {self.q_lora_rank}")
+        print(f"  kv_lora_rank: {self.kv_lora_rank}")
+        print(f"  qk_rope_head_dim: {self.qk_rope_head_dim}")
+        print(f"  He (hidden_size): {self.fused_qkv_a_proj.weight.data.shape[0]}")
+
         weight_dq = self.fused_qkv_a_proj.weight.data[..., :self.q_lora_rank].contiguous()
+        print(f"  weight_dq after slice: {weight_dq.shape}")
         # [Hcq, He] -> [He, Hcq]
-        weight_dq = weight_dq.t().contiguous() 
+        weight_dq = weight_dq.t().contiguous()
+        print(f"  weight_dq after transpose: {weight_dq.shape}")
         weight_dq = transdata(weight_dq, block_size=(16, 32)).unsqueeze(0).contiguous()
+        print(f"  weight_dq after transdata: {weight_dq.shape}")
         self.weight_dq = torch_npu.npu_format_cast(weight_dq, 29)
+        print(f"  weight_dq after npu_format_cast: {self.weight_dq.shape}")
 
         weight_dkv_kr = self.fused_qkv_a_proj.weight.data[..., self.q_lora_rank:].contiguous()
         weight_dkv_kr = weight_dkv_kr.t().contiguous()  # [He, Hckv+Dr]
@@ -881,6 +893,27 @@ class AscendSFAImpl(MLAAttentionImpl):
             f"rope_sin shape {rope_sin.shape} incompatible with hidden_states shape {hidden_states.shape}"
         assert rope_cos.shape[0] == hidden_states.shape[0], \
             f"rope_cos shape {rope_cos.shape} incompatible with hidden_states shape {hidden_states.shape}"
+
+        # DEBUG: Print shapes
+        print("[DEBUG _sfa_preprocess_decode_v3] Shapes:")
+        print(f"  q_lora_rank: {self.q_lora_rank}")
+        print(f"  kv_lora_rank: {self.kv_lora_rank}")
+        print(f"  qk_nope_head_dim: {self.qk_nope_head_dim}")
+        print(f"  qk_rope_head_dim: {self.qk_rope_head_dim}")
+        print(f"  num_heads: {self.num_heads}")
+        print(f"  q_a_layernorm.weight.data.shape: {self.q_a_layernorm.weight.data.shape}")
+        print(f"  kv_a_layernorm.weight.data.shape: {self.kv_a_layernorm.weight.data.shape}")
+        print(f"  self.weight_dq.shape: {self.weight_dq.shape}")
+        print(f"  self.weight_uq_qr.shape: {self.weight_uq_qr.shape}")
+        print(f"  self.weight_uk.shape: {self.weight_uk.shape}")
+        print(f"  self.weight_dkv_kr.shape: {self.weight_dkv_kr.shape}")
+        print(f"  hidden_states.shape: {hidden_states.shape}")
+        print(f"  quanted_hidden_states.shape: {quanted_hidden_states.shape}")
+        print(f"  k_nope.shape: {k_nope.shape}")
+        print(f"  k_pe.shape: {k_pe.shape}")
+        print(f"  cache_index.shape: {cache_index.shape}")
+        print(f"  rope_sin.shape: {rope_sin.shape}")
+        print(f"  rope_cos.shape: {rope_cos.shape}")
 
 
         query, query_rope, dequant_scale_q_nope, query_norm, dequant_scale_q_norm = torch_npu.npu_mla_prolog_v3(

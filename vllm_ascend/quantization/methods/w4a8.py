@@ -41,6 +41,7 @@ class AscendW4A8DynamicLinearMethod(AscendLinearScheme):
     def __init__(self):
         vllm_config = get_current_vllm_config()
         self.group_size = vllm_config.quant_config.quant_description.get("group_size", 256)
+        self.is_per_channel_weight = self.group_size == 0
         quant_version = vllm_config.quant_config.quant_description.get("version", "0")
         self.new_quant_version = quant_version == "1.0.0"
 
@@ -77,10 +78,13 @@ class AscendW4A8DynamicLinearMethod(AscendLinearScheme):
         params_dict = {}
         params_dict["weight_scale"] = torch.empty(output_size, 1, dtype=params_dtype)
         params_dict["weight_offset"] = torch.empty(output_size, 1, dtype=params_dtype)
-        params_dict["weight_scale_second"] = torch.empty(output_size, input_size // self.group_size, dtype=params_dtype)
-        params_dict["weight_offset_second"] = torch.empty(
-            output_size, input_size // self.group_size, dtype=params_dtype
-        )
+        if not self.is_per_channel_weight:
+            params_dict["weight_scale_second"] = torch.empty(
+                output_size, input_size // self.group_size, dtype=params_dtype
+            )
+            params_dict["weight_offset_second"] = torch.empty(
+                output_size, input_size // self.group_size, dtype=params_dtype
+            )
 
         # NOTE: In w4a8 quantization implementation,
         #       for down_proj and o_proj(layer_type == "row") scale_bias shape is [output_size, 16],
@@ -132,10 +136,11 @@ class AscendW4A8DynamicLinearMethod(AscendLinearScheme):
         bias: torch.Tensor | None = None,
         tp_rank: int | None = None,
     ) -> torch.Tensor:
+        antiquant_scale = layer.weight_scale if self.is_per_channel_weight else layer.weight_scale_second
         return torch_npu.npu_weight_quant_batchmatmul(
             x,
             layer.weight,
-            antiquant_scale=layer.weight_scale_second.to(x.dtype),
+            antiquant_scale=antiquant_scale.to(x.dtype),
             antiquant_group_size=self.group_size,
         )
 
@@ -144,12 +149,15 @@ class AscendW4A8DynamicLinearMethod(AscendLinearScheme):
         layer.weight.data = maybe_trans_nz(layer.weight.data)
         layer.weight_scale.data = layer.weight_scale.data.flatten().to(torch.float32)
         layer.weight_offset.data = layer.weight_offset.data.flatten()
-        layer.weight_scale_second.data, scale_bias = self.process_scale_second(
-            layer.weight.data,
-            layer.weight_scale.data,
-            layer.weight_scale_second.data.transpose(0, 1).contiguous(),
-            is_new_quant=self.new_quant_version,
-        )
+        if not self.is_per_channel_weight:
+            layer.weight_scale_second.data, scale_bias = self.process_scale_second(
+                layer.weight.data,
+                layer.weight_scale.data,
+                layer.weight_scale_second.data.transpose(0, 1).contiguous(),
+                is_new_quant=self.new_quant_version,
+            )
+        else:
+            scale_bias = None
 
         if self.new_quant_version:
             # Process the loaded data based on layer type

@@ -345,9 +345,9 @@ def get_linear_quant_type(
         for shard_prefix in shard_prefixes:
             shard_quant_type = quant_description[shard_prefix + ".weight"]
 
-            if quant_type is None:
+            if quant_type is None or quant_type == "FLOAT":
                 quant_type = shard_quant_type
-            elif shard_quant_type != quant_type:
+            elif shard_quant_type != quant_type and shard_quant_type != "FLOAT":
                 raise ValueError(
                     f"Not all shards of {prefix} are quantized with same quant type."
                     f"Shard {proj_name} uses {shard_quant_type}, but another shard"
@@ -554,16 +554,14 @@ class AscendModelSlimConfig(QuantizationConfig):
 
             is_skipped = None
             for shard_prefix in shard_prefixes:
-                is_shard_skipped = self.quant_description[shard_prefix + ".weight"] == "FLOAT"
+                is_shard_skipped = self.quant_description.get(shard_prefix + ".weight") == "FLOAT"
 
                 if is_skipped is None:
                     is_skipped = is_shard_skipped
                 elif is_shard_skipped != is_skipped:
-                    raise ValueError(
-                        f"Detected some but not all shards of {prefix} "
-                        "are quantized. All shards of fused layers "
-                        "to have the same precision."
-                    )
+                    # Mixed precision detected, we force quantized to handle loading later
+                    is_skipped = False
+                    break
         else:
             is_skipped = any(
                 key.startswith(prefix) and key.endswith(".weight") and value == "FLOAT"

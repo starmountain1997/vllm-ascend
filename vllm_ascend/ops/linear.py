@@ -205,6 +205,27 @@ class AscendMergedColumnParallelLinear(MergedColumnParallelLinear):
             disable_tp=disable_tp,
         )
 
+    def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor, loaded_shard_id: int | None = None):
+        if param.dtype == torch.int8 and loaded_weight.dtype != torch.int8:
+            # Symmetric quant
+            max_val = loaded_weight.abs().max().item()
+            scale = max_val / 127.0 if max_val > 0 else 1.0
+
+            # Create a dummy loaded_weight for scales
+            scale_tensor = torch.full((loaded_weight.size(0), 1), scale, dtype=self.params_dtype, device=loaded_weight.device)
+
+            # Quantize weight
+            loaded_weight = (loaded_weight / scale).round().to(torch.int8)
+
+            # Load scales if parameter exists
+            if hasattr(self, "weight_scale"):
+                super().weight_loader(self.weight_scale, scale_tensor, loaded_shard_id)
+            if hasattr(self, "weight_offset"):
+                offset_tensor = torch.zeros((loaded_weight.size(0), 1), dtype=self.params_dtype, device=loaded_weight.device)
+                super().weight_loader(self.weight_offset, offset_tensor, loaded_shard_id)
+
+        super().weight_loader(param, loaded_weight, loaded_shard_id)
+
     def forward(
         self,
         input_,
@@ -393,6 +414,27 @@ class AscendColumnParallelLinear(ColumnParallelLinear):
 
         if self.custom_op is not None:
             self.custom_op.update_attrs()
+    def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor, loaded_shard_id: int | None = None):
+        if param.dtype == torch.int8 and loaded_weight.dtype != torch.int8:
+            # Symmetric quant
+            max_val = loaded_weight.abs().max().item()
+            scale = max_val / 127.0 if max_val > 0 else 1.0
+
+            # Create a dummy loaded_weight for scales
+            scale_tensor = torch.full((loaded_weight.size(0), 1), scale, dtype=self.params_dtype, device=loaded_weight.device)
+
+            # Quantize weight
+            loaded_weight = (loaded_weight / scale).round().to(torch.int8)
+
+            # Load scales if parameter exists
+            if hasattr(self, "weight_scale"):
+                super().weight_loader(self.weight_scale, scale_tensor, loaded_shard_id)
+            if hasattr(self, "weight_offset"):
+                offset_tensor = torch.zeros((loaded_weight.size(0), 1), dtype=self.params_dtype, device=loaded_weight.device)
+                super().weight_loader(self.weight_offset, offset_tensor, loaded_shard_id)
+
+        super().weight_loader(param, loaded_weight, loaded_shard_id)
+
 
     def forward(
         self,
